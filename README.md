@@ -73,6 +73,10 @@ Background:
 npm run start:bg
 ```
 
+Each start creates a dedicated log file under `logs/`:
+
+`logs/remindex-DD-MM-YYYY-hh-mm-ss.log`
+
 Check status:
 
 ```bash
@@ -90,6 +94,8 @@ Tail logs:
 ```bash
 npm run logs
 ```
+
+This tails the active run log (or the latest `logs/remindex-*.log` if no active pointer is found).
 
 Note: run these as your regular user, not `sudo`, to avoid duplicate root-owned processes and PID-file conflicts.
 
