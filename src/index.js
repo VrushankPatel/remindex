@@ -45,9 +45,21 @@ const LAST_UPDATED_URL =
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 60_000);
 const TICK_INTERVAL_MS = 60_000;
 const HARDCODED_CONTACT = "919601501725";
+const REMINDER_TIMEZONE = process.env.REMINDER_TIMEZONE || "Asia/Kolkata";
 const STATE_DIR = path.resolve(process.cwd(), ".runtime");
 const SENT_LOG_FILE = path.join(STATE_DIR, "sent-log.json");
 const SENT_LOG_RETENTION_DAYS = 32;
+const ZONED_PARTS_FORMATTER = new Intl.DateTimeFormat("en-CA", {
+  timeZone: REMINDER_TIMEZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  weekday: "long",
+  hour12: false,
+  hourCycle: "h23"
+});
 
 let isWacliAvailable = false;
 let previousRawSnapshot = null;
@@ -129,11 +141,41 @@ function saveSentLog() {
   fs.writeFileSync(SENT_LOG_FILE, JSON.stringify(serializable, null, 2));
 }
 
-function formatLocalDate(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+function getZonedDateTimeParts(date) {
+  const parts = ZONED_PARTS_FORMATTER.formatToParts(date);
+  const raw = {
+    year: "",
+    month: "",
+    day: "",
+    hour: "",
+    minute: "",
+    weekday: ""
+  };
+
+  for (const part of parts) {
+    if (part.type === "year") {
+      raw.year = part.value;
+    } else if (part.type === "month") {
+      raw.month = part.value;
+    } else if (part.type === "day") {
+      raw.day = part.value;
+    } else if (part.type === "hour") {
+      raw.hour = part.value;
+    } else if (part.type === "minute") {
+      raw.minute = part.value;
+    } else if (part.type === "weekday") {
+      raw.weekday = part.value;
+    }
+  }
+
+  const hour = Number.parseInt(raw.hour, 10);
+  const minute = Number.parseInt(raw.minute, 10);
+  return {
+    date: `${raw.year}-${raw.month}-${raw.day}`,
+    hour: Number.isNaN(hour) ? 0 : hour,
+    minute: Number.isNaN(minute) ? 0 : minute,
+    weekday: raw.weekday.toLowerCase()
+  };
 }
 
 function convertTimeTo24h(timeConfig) {
@@ -193,28 +235,18 @@ function isAnyReminderTimeDueNow(reminder, now) {
   if (timeConfigs.length === 0) {
     return false;
   }
+  const nowParts = getZonedDateTimeParts(now);
 
   for (const timeConfig of timeConfigs) {
     const normalizedTime = convertTimeTo24h(timeConfig);
     if (!normalizedTime) {
       continue;
     }
-    if (normalizedTime.hour === now.getHours() && normalizedTime.minute === now.getMinutes()) {
+    if (normalizedTime.hour === nowParts.hour && normalizedTime.minute === nowParts.minute) {
       return true;
     }
   }
   return false;
-}
-
-function buildScheduledDateFromCreatedAt(createdAtDate, timeConfig) {
-  const normalizedTime = convertTimeTo24h(timeConfig);
-  if (!normalizedTime) {
-    return null;
-  }
-
-  const scheduled = new Date(createdAtDate);
-  scheduled.setHours(normalizedTime.hour, normalizedTime.minute, 0, 0);
-  return scheduled;
 }
 
 function isOneTimeDueNow(reminder, now) {
@@ -226,29 +258,35 @@ function isOneTimeDueNow(reminder, now) {
     return false;
   }
 
-  const createdAtDate = new Date(createdAtMs);
+  const createdParts = getZonedDateTimeParts(new Date(createdAtMs));
+  const nowParts = getZonedDateTimeParts(now);
   const timeConfigs = getReminderTimeConfigs(reminder);
   if (timeConfigs.length === 0) {
     return false;
   }
 
-  const nowDateLabel = formatLocalDate(now);
   for (const timeConfig of timeConfigs) {
-    const scheduled = buildScheduledDateFromCreatedAt(createdAtDate, timeConfig);
-    if (!scheduled) {
+    const normalizedTime = convertTimeTo24h(timeConfig);
+    if (!normalizedTime) {
       continue;
     }
 
-    // "one_time" is only valid if selected time is strictly after creation instant.
-    if (scheduled.getTime() <= createdAtMs) {
+    // "one_time" is only valid on creation date in configured reminder timezone.
+    if (createdParts.date !== nowParts.date) {
       continue;
     }
 
-    if (formatLocalDate(scheduled) !== nowDateLabel) {
+    // Selected time must be strictly after createdAt local minute.
+    if (normalizedTime.hour < createdParts.hour) {
       continue;
     }
-
-    if (scheduled.getHours() === now.getHours() && scheduled.getMinutes() === now.getMinutes()) {
+    if (
+      normalizedTime.hour === createdParts.hour &&
+      normalizedTime.minute <= createdParts.minute
+    ) {
+      continue;
+    }
+    if (normalizedTime.hour === nowParts.hour && normalizedTime.minute === nowParts.minute) {
       return true;
     }
   }
@@ -262,17 +300,11 @@ function isDateTypeMatch(reminder, now) {
   }
 
   const { date } = reminder;
-  const todayDate = formatLocalDate(now);
-  const weekDayNames = [
-    "sunday",
-    "monday",
-    "tuesday",
-    "wednesday",
-    "thursday",
-    "friday",
-    "saturday"
-  ];
-  const todayName = weekDayNames[now.getDay()];
+  const nowParts = getZonedDateTimeParts(now);
+  const todayDate = nowParts.date;
+  const todayName = nowParts.weekday;
+  const weekdaySet = new Set(["monday", "tuesday", "wednesday", "thursday", "friday"]);
+  const weekendSet = new Set(["saturday", "sunday"]);
 
   switch (date.type) {
     case "one_time":
@@ -280,9 +312,9 @@ function isDateTypeMatch(reminder, now) {
     case "everyday":
       return true;
     case "weekdays":
-      return now.getDay() >= 1 && now.getDay() <= 5;
+      return weekdaySet.has(todayName);
     case "weekends":
-      return now.getDay() === 0 || now.getDay() === 6;
+      return weekendSet.has(todayName);
     case "custom":
       if (!Array.isArray(date.customDays)) {
         return false;
@@ -510,10 +542,10 @@ async function evaluateAndDispatchDueReminders() {
 }
 
 function dispatchKey(reminderId, contact, now) {
+  const nowParts = getZonedDateTimeParts(now);
   const minuteBucket =
-    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-` +
-    `${String(now.getDate()).padStart(2, "0")}T${String(now.getHours()).padStart(2, "0")}:` +
-    `${String(now.getMinutes()).padStart(2, "0")}`;
+    `${nowParts.date}T${String(nowParts.hour).padStart(2, "0")}:` +
+    `${String(nowParts.minute).padStart(2, "0")}`;
   return `${reminderId}|${contact}|${minuteBucket}`;
 }
 
@@ -707,6 +739,7 @@ async function run() {
   logInfo("Starting reminder dispatcher (read-mostly; one_time cleanup enabled).");
   logInfo(`Cache-buster source: ${LAST_UPDATED_URL}`);
   logInfo(`Reminders source (on cache miss): ${REMINDERS_URL}`);
+  logInfo(`Reminder evaluation timezone: ${REMINDER_TIMEZONE}`);
   logInfo(`Cache check interval (ms): ${POLL_INTERVAL_MS}`);
   logInfo(`Dispatch evaluation interval (ms): ${TICK_INTERVAL_MS}`);
 

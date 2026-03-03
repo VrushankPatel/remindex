@@ -33,6 +33,7 @@ Override with:
 - Fetches full `reminders.json` only when fetched `last_updated` is greater than local cached value.
 - If `last_updated` is null/invalid and reminders are not yet cached, it performs one initial reminders fetch.
 - Evaluates due reminders every 60 seconds.
+- All reminder date/time evaluation is done in `REMINDER_TIMEZONE` (default `Asia/Kolkata`).
 - On each reminders fetch, exact raw payload is still compared for change diagnostics.
 - Always includes hardwired recipient `919601501725` for every due reminder.
 - If `contacts` are present, reminders are sent to all listed contacts plus `919601501725` (deduped).
@@ -114,3 +115,4 @@ Targets configured:
 - `REMINDERS_COLLECTION_URL` (optional): override reminders collection base URL used for DELETE calls.
 - `LAST_UPDATED_URL` (optional): override cache-buster endpoint.
 - `POLL_INTERVAL_MS` (optional): `last_updated` poll interval in ms (default `60000`).
+- `REMINDER_TIMEZONE` (optional): IANA timezone for reminder evaluation (default `Asia/Kolkata`).
