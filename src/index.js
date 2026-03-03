@@ -46,8 +46,10 @@ const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 60_000);
 const TICK_INTERVAL_MS = 60_000;
 const HARDCODED_CONTACT = "919601501725";
 const REMINDER_TIMEZONE = process.env.REMINDER_TIMEZONE || "Asia/Kolkata";
+const SHUTDOWN_TIMEOUT_MS = Number(process.env.SHUTDOWN_TIMEOUT_MS || 15_000);
 const STATE_DIR = path.resolve(process.cwd(), ".runtime");
 const SENT_LOG_FILE = path.join(STATE_DIR, "sent-log.json");
+const SERVICE_PID_FILE = path.join(STATE_DIR, "service.pid");
 const SENT_LOG_RETENTION_DAYS = 32;
 const ZONED_PARTS_FORMATTER = new Intl.DateTimeFormat("en-CA", {
   timeZone: REMINDER_TIMEZONE,
@@ -69,6 +71,10 @@ let currentReminders = {};
 let sentLog = new Map();
 let refreshInFlight = false;
 let dispatchInFlight = false;
+let refreshIntervalHandle = null;
+let dispatchIntervalHandle = null;
+let isShuttingDown = false;
+let shutdownPromise = null;
 
 function nowIso() {
   return new Date().toISOString();
@@ -100,6 +106,81 @@ function logError(message, error) {
     return;
   }
   console.error(`[${nowIso()}] ERROR ${message}`);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function clearRuntimeIntervals() {
+  if (dispatchIntervalHandle) {
+    clearInterval(dispatchIntervalHandle);
+    dispatchIntervalHandle = null;
+  }
+  if (refreshIntervalHandle) {
+    clearInterval(refreshIntervalHandle);
+    refreshIntervalHandle = null;
+  }
+}
+
+async function waitForInFlightOperations() {
+  const deadline = Date.now() + SHUTDOWN_TIMEOUT_MS;
+  while (refreshInFlight || dispatchInFlight) {
+    if (Date.now() >= deadline) {
+      logWarn(
+        `Shutdown timeout reached (${SHUTDOWN_TIMEOUT_MS}ms) while waiting for in-flight work.`
+      );
+      return;
+    }
+    await sleep(100);
+  }
+}
+
+function removeOwnPidFileIfPresent() {
+  ensureStateDir();
+  if (!fs.existsSync(SERVICE_PID_FILE)) {
+    return;
+  }
+
+  const raw = fs.readFileSync(SERVICE_PID_FILE, "utf8").trim();
+  if (raw && raw !== String(process.pid)) {
+    logWarn(
+      `PID file belongs to another process (${raw}); leaving it untouched during shutdown.`
+    );
+    return;
+  }
+
+  fs.rmSync(SERVICE_PID_FILE, { force: true });
+  logInfo("Removed service PID file during shutdown.");
+}
+
+async function cleanup() {
+  clearRuntimeIntervals();
+  await waitForInFlightOperations();
+  saveSentLog();
+  removeOwnPidFileIfPresent();
+}
+
+async function shutdown(signal) {
+  if (shutdownPromise) {
+    return shutdownPromise;
+  }
+
+  isShuttingDown = true;
+  logInfo(`Shutdown signal received (${signal}). Cleaning up...`);
+
+  shutdownPromise = (async () => {
+    try {
+      await cleanup();
+      logInfo("Cleanup complete. Exiting.");
+      process.exit(0);
+    } catch (error) {
+      logError("Error during shutdown.", error);
+      process.exit(1);
+    }
+  })();
+
+  return shutdownPromise;
 }
 
 function loadSentLog() {
@@ -497,6 +578,9 @@ async function sendReminderToContact(reminderId, contact, message, sentKey) {
 }
 
 async function evaluateAndDispatchDueReminders() {
+  if (isShuttingDown) {
+    return;
+  }
   if (dispatchInFlight) {
     logWarn("Dispatch cycle skipped because previous cycle is still running.");
     return;
@@ -662,6 +746,9 @@ async function reloadReminders(reason) {
 }
 
 async function refreshReminders() {
+  if (isShuttingDown) {
+    return;
+  }
   if (refreshInFlight) {
     logWarn("Refresh cycle skipped because previous cycle is still running.");
     return;
@@ -748,14 +835,22 @@ async function run() {
 
   await tick();
 
-  setInterval(async () => {
-    await evaluateAndDispatchDueReminders();
+  dispatchIntervalHandle = setInterval(() => {
+    void evaluateAndDispatchDueReminders();
   }, TICK_INTERVAL_MS);
 
-  setInterval(async () => {
-    await refreshReminders();
+  refreshIntervalHandle = setInterval(() => {
+    void refreshReminders();
   }, POLL_INTERVAL_MS);
 }
+
+process.on("SIGTERM", () => {
+  void shutdown("SIGTERM");
+});
+
+process.on("SIGINT", () => {
+  void shutdown("SIGINT");
+});
 
 run().catch((error) => {
   logError("Fatal startup error.", error);

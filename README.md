@@ -34,6 +34,7 @@ Override with:
 - If `last_updated` is null/invalid and reminders are not yet cached, it performs one initial reminders fetch.
 - Evaluates due reminders every 60 seconds.
 - All reminder date/time evaluation is done in `REMINDER_TIMEZONE` (default `Asia/Kolkata`).
+- Handles `SIGTERM`/`SIGINT` gracefully: stops intervals, waits for in-flight work, persists state, removes its own PID file, exits with code `0`.
 - On each reminders fetch, exact raw payload is still compared for change diagnostics.
 - Always includes hardwired recipient `919601501725` for every due reminder.
 - If `contacts` are present, reminders are sent to all listed contacts plus `919601501725` (deduped).
@@ -124,3 +125,4 @@ Targets configured:
 - `LAST_UPDATED_URL` (optional): override cache-buster endpoint.
 - `POLL_INTERVAL_MS` (optional): `last_updated` poll interval in ms (default `60000`).
 - `REMINDER_TIMEZONE` (optional): IANA timezone for reminder evaluation (default `Asia/Kolkata`).
+- `SHUTDOWN_TIMEOUT_MS` (optional): max wait time for in-flight work during graceful shutdown (default `15000`).
