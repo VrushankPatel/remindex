@@ -7,8 +7,9 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/index.js",
-    "start:bg": "sh -c 'mkdir -p .runtime && nohup node src/index.js > .runtime/service.log 2>&1 & echo $! > .runtime/service.pid && echo \"Started with PID $(cat .runtime/service.pid)\"'",
-    "stop:bg": "sh -c 'if [ -f .runtime/service.pid ]; then kill $(cat .runtime/service.pid) && rm -f .runtime/service.pid && echo \"Stopped\"; else echo \"No PID file found\"; fi'",
+    "start:bg": "sh -c 'mkdir -p .runtime; if [ -f .runtime/service.pid ]; then pid=$(cat .runtime/service.pid); if kill -0 \"$pid\" 2>/dev/null; then echo \"Already running with PID $pid\"; exit 1; else echo \"Removing stale PID file ($pid)\"; rm -f .runtime/service.pid; fi; fi; nohup node src/index.js >> .runtime/service.log 2>&1 & pid=$!; echo \"$pid\" > .runtime/service.pid; echo \"Started with PID $pid\"'",
+    "stop:bg": "sh -c 'if [ -f .runtime/service.pid ]; then pid=$(cat .runtime/service.pid); if kill -0 \"$pid\" 2>/dev/null; then kill \"$pid\" && echo \"Stopped PID $pid\"; else echo \"Process $pid not running (stale PID file)\"; fi; rm -f .runtime/service.pid; else echo \"No PID file found\"; fi'",
+    "status:bg": "sh -c 'if [ -f .runtime/service.pid ]; then pid=$(cat .runtime/service.pid); if kill -0 \"$pid\" 2>/dev/null; then echo \"Running with PID $pid\"; else echo \"Not running (stale PID file for PID $pid)\"; fi; else echo \"Not running\"; fi'",
     "logs": "tail -f .runtime/service.log",
     "build:bin": "pkg package.json"
   },

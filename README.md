@@ -72,6 +72,12 @@ Background:
 npm run start:bg
 ```
 
+Check status:
+
+```bash
+npm run status:bg
+```
+
 Stop background:
 
 ```bash
@@ -83,6 +89,8 @@ Tail logs:
 ```bash
 npm run logs
 ```
+
+Note: run these as your regular user, not `sudo`, to avoid duplicate root-owned processes and PID-file conflicts.
 
 ## `wacli` Requirement
 
