@@ -1,0 +1,37 @@
+{
+  "name": "normiculus-reminder-dispatcher",
+  "version": "1.0.0",
+  "description": "Background reminder dispatcher for WhatsApp using wacli and Firebase Realtime Database (read-only).",
+  "main": "src/index.js",
+  "bin": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "start:bg": "sh -c 'mkdir -p .runtime && nohup node src/index.js > .runtime/service.log 2>&1 & echo $! > .runtime/service.pid && echo \"Started with PID $(cat .runtime/service.pid)\"'",
+    "stop:bg": "sh -c 'if [ -f .runtime/service.pid ]; then kill $(cat .runtime/service.pid) && rm -f .runtime/service.pid && echo \"Stopped\"; else echo \"No PID file found\"; fi'",
+    "logs": "tail -f .runtime/service.log",
+    "build:bin": "pkg package.json"
+  },
+  "keywords": [
+    "reminder",
+    "whatsapp",
+    "firebase",
+    "scheduler"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  },
+  "pkg": {
+    "targets": [
+      "node20-macos-x64",
+      "node20-macos-arm64",
+      "node20-linux-x64",
+      "node20-linux-arm64"
+    ],
+    "outputPath": "build/bin"
+  }
+}
